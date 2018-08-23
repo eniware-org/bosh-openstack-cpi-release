@@ -41,6 +41,8 @@ module Bosh::OpenStackCloud
 
     def with_openstack(retryable: false, ignore_not_found: false)
       retries = 0
+      retryable_errors = [Excon::Error::Timeout, Excon::Error::Socket, Excon::Error::ServiceUnavailable, Excon::Error::InternalServerError]
+
       begin
         yield
       rescue Excon::Error::RequestEntityTooLarge => e
@@ -62,46 +64,23 @@ module Bosh::OpenStackCloud
           message.insert(46, e.response.body)
         end
         cloud_error(message, e)
-      rescue Excon::Error::ServiceUnavailable => e
-        unless retries >= MAX_RETRIES
-          retries = sleep_and_count_retries('OpenStack API Service Unavailable error', retries)
-          retry
-        end
-        cloud_error('OpenStack API Service Unavailable error. Check task debug log for details.', e)
-      rescue Excon::Error::BadRequest => e
-        cloud_error("OpenStack API Bad Request#{error_response_message(e)}. Check task debug log for details.", e)
-      rescue Excon::Error::Conflict => e
-        cloud_error("OpenStack API Conflict#{error_response_message(e)}. Check task debug log for details.", e)
-      rescue Excon::Error::Forbidden => e
-        cloud_error("OpenStack API Forbidden#{error_response_message(e)}. Check task debug log for details.", e)
-      rescue Excon::Error::InternalServerError => e
-        unless retries >= MAX_RETRIES
-          retries = sleep_and_count_retries('OpenStack API Internal Server error', retries)
-          retry
-        end
-        cloud_error('OpenStack API Internal Server error. Check task debug log for details.', e)
+
       rescue Fog::Errors::NotFound => e
-        if ignore_not_found
-          @logger.debug("Suppressed 'not found' error message: #{e.message}")
-        else
-          cloud_error("OpenStack API service not found error: #{e.message}\nCheck task debug log for details.", e)
-        end
-      rescue Excon::Error::Timeout => e
-        cloud_error("Timeout: #{e.message}\nCheck task debug log for details.", e) unless retryable && MAX_RETRIES > retries + 1
-        retries = sleep_and_count_retries("OpenStack API Timeout error #{e.message}", retries)
-        retry
-      rescue Excon::Error::Socket => e
-        cloud_error("SocketError: #{e.message}\nCheck task debug log for details.", e) unless (e.message =~ /getaddrinfo/ || retryable)  && MAX_RETRIES > retries + 1
-        retries = sleep_and_count_retries("OpenStack API SocketError #{e.message}", retries)
+        raise_openstack_error(e) unless ignore_not_found
+        @logger.debug("Suppressed 'not found' error message: #{e.message}")
+
+      rescue Excon::Error::BadRequest, Excon::Error::Conflict, Excon::Error::Forbidden => e
+        raise_openstack_error(e, format_error_body(e))
+
+      rescue *retryable_errors => e
+        raise_openstack_error(e) unless retries < MAX_RETRIES &&
+          (dns_problems?(e) || connectivity_problems?(e) && retryable || server_problems?(e))
+
+        retries += 1
+        log_retry_error(retries, e)
+        sleep(DEFAULT_RETRY_TIMEOUT)
         retry
       end
-    end
-
-    def sleep_and_count_retries(message, retry_index)
-      retry_index += 1
-      @logger.info(message + ", retrying (#{retry_index}/#{MAX_RETRIES})")
-      sleep(DEFAULT_RETRY_TIMEOUT)
-      retry_index
     end
 
     def project_name
@@ -253,9 +232,50 @@ module Bosh::OpenStackCloud
 
     private
 
-    def error_response_message(e)
+    # def format_error_response_message(e)
+      # body = parse_openstack_response_body(e.response.body)
+      # msg = determine_message(body)
+      # format_error_message(e, msg)
+    # end
+
+    # def format_error_message(e, msg=nil)
+      # error_name = get_error_class_name(e)
+      # error = [error_name, e.message, msg].uniq.reject(&:nil?).reject(&:empty?).join(' ')
+      # "OpenStack API #{error}.\nCheck task debug log for details."
+    # end
+
+    def dns_problems?(e)
+      e.is_a?(Excon::Error::Socket) && e.message =~ /getaddrinfo/
+    end
+
+    def connectivity_problems?(e)
+      e.is_a?(Excon::Error::Timeout) || e.is_a?(Excon::Error::Socket)
+    end
+
+    def server_problems?(e)
+      e.is_a?(Excon::Error::ServiceUnavailable) || e.is_a?(Excon::Error::InternalServerError)
+    end
+
+    def format_error_body(e)
       body = parse_openstack_response_body(e.response.body)
-      determine_message(body)
+      msg = determine_message(body)
+      format_error(e, msg)
+    end
+
+    def format_error(e, msg = nil)
+      error_name = e.class.name.split('::').last
+      [error_name, e.message, msg].uniq.reject(&:nil?).reject(&:empty?).join(' ')
+    end
+
+    def raise_openstack_error(e, msg = nil)
+      msg ||= format_error(e)
+      msg = "OpenStack API #{msg}.\nCheck task debug log for details."
+      cloud_error(msg, e)
+    end
+
+    def log_retry_error(retry_index, e)
+      retry_msg = "OpenStack API #{format_error(e)}, retrying (#{retry_index}/#{MAX_RETRIES})"
+      @logger.info(retry_msg)
     end
 
     def openstack_params(options)
@@ -317,7 +337,7 @@ module Bosh::OpenStackCloud
 
       body ||= {}
       _, value = body.find &hash_with_msg_property
-      value ? " (#{value['message']})" : ''
+      value ? "(#{value['message']})" : ''
     end
 
     def parse_openstack_response_body(body)

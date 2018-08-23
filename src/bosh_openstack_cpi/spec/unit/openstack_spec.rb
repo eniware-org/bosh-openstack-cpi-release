@@ -434,7 +434,7 @@ describe Bosh::OpenStackCloud::Openstack do
             subject.servers
           end
         }.to raise_error(Bosh::Clouds::CloudError,
-                         'OpenStack API Service Unavailable error. Check task debug log for details.')
+                         "OpenStack API ServiceUnavailable.\nCheck task debug log for details.")
       end
     end
 
@@ -567,7 +567,7 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-                           'OpenStack API Bad Request (some-message). Check task debug log for details.')
+                           "OpenStack API BadRequest (some-message).\nCheck task debug log for details.")
         end
       end
 
@@ -580,7 +580,7 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-                           'OpenStack API Bad Request. Check task debug log for details.')
+                           "OpenStack API BadRequest.\nCheck task debug log for details.")
         end
       end
 
@@ -593,7 +593,7 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-                           'OpenStack API Bad Request. Check task debug log for details.')
+                           "OpenStack API BadRequest.\nCheck task debug log for details.")
         end
       end
     end
@@ -615,7 +615,7 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-                           'OpenStack API Conflict (some-message). Check task debug log for details.')
+                           "OpenStack API Conflict (some-message).\nCheck task debug log for details.")
         end
       end
 
@@ -628,7 +628,7 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-                           'OpenStack API Conflict. Check task debug log for details.')
+                           "OpenStack API Conflict.\nCheck task debug log for details.")
         end
       end
 
@@ -641,7 +641,7 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-                           'OpenStack API Conflict. Check task debug log for details.')
+                           "OpenStack API Conflict.\nCheck task debug log for details.")
         end
       end
     end
@@ -657,7 +657,7 @@ describe Bosh::OpenStackCloud::Openstack do
             subject.servers
           end
         }.to raise_error(Bosh::Clouds::CloudError,
-                         'OpenStack API Internal Server error. Check task debug log for details.')
+                         "OpenStack API InternalServerError.\nCheck task debug log for details.")
       end
     end
 
@@ -668,7 +668,7 @@ describe Bosh::OpenStackCloud::Openstack do
         expect {
           subject.with_openstack { raise Fog::Errors::NotFound, openstack_error_message }
         }.to raise_error(Bosh::Clouds::CloudError,
-                         "OpenStack API service not found error: #{openstack_error_message}\nCheck task debug log for details.")
+                         "OpenStack API NotFound #{openstack_error_message}.\nCheck task debug log for details.")
       end
 
       context 'when NotFound is ignored' do
@@ -697,7 +697,7 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-                           'OpenStack API Forbidden (some-message). Check task debug log for details.')
+                           "OpenStack API Forbidden (some-message).\nCheck task debug log for details.")
         end
       end
 
@@ -710,7 +710,7 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-                           'OpenStack API Forbidden. Check task debug log for details.')
+                           "OpenStack API Forbidden.\nCheck task debug log for details.")
         end
       end
 
@@ -723,7 +723,7 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-                           'OpenStack API Forbidden. Check task debug log for details.')
+                           "OpenStack API Forbidden.\nCheck task debug log for details.")
         end
       end
     end
@@ -741,9 +741,9 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-            "Timeout: foo\nCheck task debug log for details.")
+                           "OpenStack API Timeout foo.\nCheck task debug log for details.")
 
-          expect(subject).to have_received(:servers).exactly(Bosh::OpenStackCloud::Openstack::MAX_RETRIES).times
+          expect(subject).to have_received(:servers).exactly(Bosh::OpenStackCloud::Openstack::MAX_RETRIES + 1).times
         end
       end
 
@@ -754,7 +754,7 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-            "Timeout: foo\nCheck task debug log for details.")
+                           "OpenStack API Timeout foo.\nCheck task debug log for details.")
 
           expect(subject).to have_received(:servers).once
         end
@@ -777,9 +777,9 @@ describe Bosh::OpenStackCloud::Openstack do
               subject.servers
             end
           }.to raise_error(Bosh::Clouds::CloudError,
-                           "SocketError: getaddrinfo: nodename nor servname provided, or not known (SocketError)\nCheck task debug log for details.")
+                           "OpenStack API Socket getaddrinfo: nodename nor servname provided, or not known (SocketError).\nCheck task debug log for details.")
 
-          expect(subject).to have_received(:servers).exactly(Bosh::OpenStackCloud::Openstack::MAX_RETRIES).times
+          expect(subject).to have_received(:servers).exactly(Bosh::OpenStackCloud::Openstack::MAX_RETRIES + 1).times
         end
       end
 
@@ -795,9 +795,9 @@ describe Bosh::OpenStackCloud::Openstack do
                 subject.servers
               end
             }.to raise_error(Bosh::Clouds::CloudError,
-                             "SocketError: foo (SocketError)\nCheck task debug log for details.")
+                           "OpenStack API Socket foo (SocketError).\nCheck task debug log for details.")
 
-            expect(subject).to have_received(:servers).exactly(Bosh::OpenStackCloud::Openstack::MAX_RETRIES).times
+            expect(subject).to have_received(:servers).exactly(Bosh::OpenStackCloud::Openstack::MAX_RETRIES + 1).times
           end
         end
 
@@ -808,7 +808,7 @@ describe Bosh::OpenStackCloud::Openstack do
                 subject.servers
               end
             }.to raise_error(Bosh::Clouds::CloudError,
-                             "SocketError: foo (SocketError)\nCheck task debug log for details.")
+                           "OpenStack API Socket foo (SocketError).\nCheck task debug log for details.")
 
             expect(subject).to have_received(:servers).once
           end
