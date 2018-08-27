@@ -8,7 +8,7 @@ module Bosh::OpenStackCloud
     MAX_RETRIES = 10 # Max number of retries
     DEFAULT_RETRY_TIMEOUT = 3 # Default timeout before retrying a call (in seconds)
 
-    attr_reader :auth_url, :params, :is_v3, :state_timeout
+    attr_reader :auth_url, :params, :is_v3, :state_timeout, :retry_count
 
     def self.is_v3(auth_url)
       auth_url.match(/\/v3(?=\/|$)/)
@@ -46,24 +46,17 @@ module Bosh::OpenStackCloud
       begin
         yield
       rescue Excon::Error::RequestEntityTooLarge => e
-        message = "OpenStack API Request Entity Too Large error: \nCheck task debug log for details."
         overlimit = parse_openstack_response(e.response, 'overLimit', 'overLimitFault')
 
-        if overlimit
-          message.insert(46, overlimit['message'])
-          details = "#{overlimit['message']} - #{overlimit['details']}"
+        msg = overlimit.dig('message'] || format_error_body(e)
+        raise_openstack_error(e, msg) unless overlimit || retries > MAX_RETRIES
 
-          if retries < MAX_RETRIES
-            wait_time = overlimit['retryAfter'] || e.response.headers['Retry-After'] || DEFAULT_RETRY_TIMEOUT
-            @logger.debug("OpenStack API Over Limit (#{details}), waiting #{wait_time} seconds before retrying")
-            sleep(wait_time.to_i)
-            retries += 1
-            retry
-          end
-        else
-          message.insert(46, e.response.body)
-        end
-        cloud_error(message, e)
+        raise_openstack_error(e, format_error_body(e)) unless overlimit
+        raise_openstack_error(e, overlimit['message']) unless retries < MAX_RETRIES
+
+        retries += 1
+        sleep_and_log_overlimit(e, overlimit, retries)
+        retry
 
       rescue Fog::Errors::NotFound => e
         raise_openstack_error(e) unless ignore_not_found
@@ -75,12 +68,25 @@ module Bosh::OpenStackCloud
       rescue *retryable_errors => e
         raise_openstack_error(e) unless retries < MAX_RETRIES &&
           (dns_problems?(e) || connectivity_problems?(e) && retryable || server_problems?(e))
-
         retries += 1
-        log_retry_error(retries, e)
+        log_retry_error(e, retries)
         sleep(DEFAULT_RETRY_TIMEOUT)
         retry
+      rescue *retryable_errors => e
+        raise_openstack_error(e) unless retryable?(e) &&
+          (dns_problems?(e) || connectivity_problems?(e) && retryable || server_problems?(e))
+        retry
+      rescue *retryable_errors => e
+        retry if retryable?(e) &&
+          (dns_problems?(e) || connectivity_problems?(e) && retryable || server_problems?(e))
+        raise_openstack_error(e)
       end
+    end
+
+    def retryable?(e)
+      retry_count += 1
+      log_retry_error(e, retry_count)
+      sleep(DEFAULT_RETRY_TIMEOUT)
     end
 
     def project_name
@@ -244,6 +250,13 @@ module Bosh::OpenStackCloud
       # "OpenStack API #{error}.\nCheck task debug log for details."
     # end
 
+    def sleep_and_log_overlimit(e, overlimit, retries)
+      wait_time = overlimit['retryAfter'] || e.response.headers['Retry-After'] || DEFAULT_RETRY_TIMEOUT
+      overlimit_msg = "Over Limit: #{overlimit['message']} - #{overlimit['details']}"
+      log_retry_error(e, retries, overlimit_msg, wait_time)
+      sleep(wait_time.to_i)
+    end
+
     def dns_problems?(e)
       e.is_a?(Excon::Error::Socket) && e.message =~ /getaddrinfo/
     end
@@ -273,8 +286,9 @@ module Bosh::OpenStackCloud
       cloud_error(msg, e)
     end
 
-    def log_retry_error(retry_index, e)
-      retry_msg = "OpenStack API #{format_error(e)}, retrying (#{retry_index}/#{MAX_RETRIES})"
+    def log_retry_error(e, retry_index, msg = nil, wait_time = DEFAULT_RETRY_TIMEOUT)
+      msg ||= format_error(e)
+      retry_msg = "OpenStack API #{msg}, retrying (#{retry_index}/#{MAX_RETRIES} after #{DEFAULT_RETRY_TIMEOUT} seconds.)"
       @logger.info(retry_msg)
     end
 
